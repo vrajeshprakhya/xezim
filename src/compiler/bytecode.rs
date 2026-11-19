@@ -649,6 +649,12 @@ pub enum Insn {
     /// §11.4.3 `**` with a non-constant base: left operand pre-resized to the
     /// operation width by the compiler; result width = left's width.
     Pow(RegId, RegId, RegId),
+    /// §20.5, §20.8.2: a real math or real-conversion system function,
+    /// `dest = op(a, b)` (`$sqrt(a)`, `$atan2(a, b)`, `$rtoi(a)`, ...). For a
+    /// one-operand function `b` repeats `a`. `RealMathOp::apply` is also what
+    /// the interpreter runs, so the compiled and interpreted results are the
+    /// same bits. A pure function of its registers, so every exec loop runs it.
+    RealMath(RegId, RegId, RegId, RealMathOp),
     /// Read a field of the object whose handle is in a register off the object
     /// heap: `dest = heap[handle].properties[field]`. Class methods (not the
     /// signal namespace) resolve `this.<field>` to this. `class-perf` tier-1
@@ -954,6 +960,119 @@ pub struct DynElemOp {
 }
 
 const _: () = assert!(std::mem::size_of::<Insn>() <= 24, "Insn grew past 24 bytes");
+
+/// The system functions `Insn::RealMath` evaluates (§20.5 conversions,
+/// §20.8.2 Table 20-4 math functions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RealMathOp {
+    Ln,
+    Log10,
+    Exp,
+    Sqrt,
+    Pow,
+    Floor,
+    Ceil,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Atan2,
+    Hypot,
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
+    Rtoi,
+    Itor,
+    RealToBits,
+    BitsToReal,
+}
+
+impl RealMathOp {
+    /// The operation a system function names, with its operand count.
+    pub fn from_name(name: &str) -> Option<(Self, usize)> {
+        use RealMathOp as M;
+        Some(match name {
+            "$ln" => (M::Ln, 1),
+            "$log10" => (M::Log10, 1),
+            // Not `$log2`: it is no IEEE 1800 function, and
+            // `system_function_is_real` (which the compiler's real-ness
+            // analyses use) does not list it, so it stays interpreted.
+            "$exp" => (M::Exp, 1),
+            "$sqrt" => (M::Sqrt, 1),
+            "$pow" => (M::Pow, 2),
+            "$floor" => (M::Floor, 1),
+            "$ceil" => (M::Ceil, 1),
+            "$sin" => (M::Sin, 1),
+            "$cos" => (M::Cos, 1),
+            "$tan" => (M::Tan, 1),
+            "$asin" => (M::Asin, 1),
+            "$acos" => (M::Acos, 1),
+            "$atan" => (M::Atan, 1),
+            "$atan2" => (M::Atan2, 2),
+            "$hypot" => (M::Hypot, 2),
+            "$sinh" => (M::Sinh, 1),
+            "$cosh" => (M::Cosh, 1),
+            "$tanh" => (M::Tanh, 1),
+            "$asinh" => (M::Asinh, 1),
+            "$acosh" => (M::Acosh, 1),
+            "$atanh" => (M::Atanh, 1),
+            "$rtoi" => (M::Rtoi, 1),
+            "$itor" => (M::Itor, 1),
+            "$realtobits" => (M::RealToBits, 1),
+            "$bitstoreal" => (M::BitsToReal, 1),
+            _ => return None,
+        })
+    }
+
+    /// The result, from the evaluated operands. The interpreter's system
+    /// function arms call this too: one definition, so a compiled and an
+    /// interpreted evaluation cannot drift apart.
+    pub fn apply(self, a: &Value, b: &Value) -> Value {
+        use RealMathOp as M;
+        match self {
+            // §20.5: `integer` (signed 32-bit); 0 outside the 64-bit range.
+            M::Rtoi => Value::rtoi(a.to_f64()),
+            // §20.5: a signed operand converts with its sign (-5 -> -5.0).
+            M::Itor => Value::from_f64(a.to_i64().unwrap_or(0) as f64),
+            // §20.5: the IEEE 754 pattern as a 64-bit integer, and back.
+            M::RealToBits => Value::from_u64(a.to_f64().to_bits(), 64),
+            M::BitsToReal => Value::from_f64(f64::from_bits(a.to_u64().unwrap_or(0))),
+            _ => {
+                let x = a.to_f64();
+                Value::from_f64(match self {
+                    M::Ln => x.ln(),
+                    M::Log10 => x.log10(),
+                    M::Exp => x.exp(),
+                    M::Sqrt => x.sqrt(),
+                    M::Pow => x.powf(b.to_f64()),
+                    M::Floor => x.floor(),
+                    M::Ceil => x.ceil(),
+                    M::Sin => x.sin(),
+                    M::Cos => x.cos(),
+                    M::Tan => x.tan(),
+                    M::Asin => x.asin(),
+                    M::Acos => x.acos(),
+                    M::Atan => x.atan(),
+                    // Table 20-4: `$atan2(y, x)`, first operand y.
+                    M::Atan2 => x.atan2(b.to_f64()),
+                    M::Hypot => x.hypot(b.to_f64()),
+                    M::Sinh => x.sinh(),
+                    M::Cosh => x.cosh(),
+                    M::Tanh => x.tanh(),
+                    M::Asinh => x.asinh(),
+                    M::Acosh => x.acosh(),
+                    M::Atanh => x.atanh(),
+                    M::Rtoi | M::Itor | M::RealToBits | M::BitsToReal => unreachable!(),
+                })
+            }
+        }
+    }
+}
 
 /// Pre-resolved unpacked-array addressing embedded in bytecode. The name is
 /// retained for diagnostics and the rare unresolved fallback, while normal
@@ -1392,6 +1511,7 @@ impl Insn {
             | Div(a, b, c)
             | Mod(a, b, c)
             | Pow(a, b, c)
+            | RealMath(a, b, c, _)
             | BitAnd(a, b, c)
             | BitOr(a, b, c)
             | BitXor(a, b, c)
@@ -1580,6 +1700,7 @@ pub fn insn_opcode_name(i: &Insn) -> &'static str {
         Insn::RealToInt(..) => "RealToInt",
         Insn::ClearSigned(..) => "ClearSigned",
         Insn::Pow(..) => "Pow",
+        Insn::RealMath(..) => "RealMath",
         Insn::LoadClassMember(..) => "LoadCls",
         Insn::StoreClassMember(..) => "StoreCls",
         Insn::CallMethod(..) => "CallM,",
@@ -8961,10 +9082,14 @@ impl<'a> BytecodeCompiler<'a> {
                     ) {
                         return args.iter().skip(1).all(|a| expr_ok(a, bound, me, ext));
                     }
-                    matches!(
+                    // §20.5, §20.8.2: the real math and conversion functions
+                    // are pure in their operands too, and compile to
+                    // `Insn::RealMath` at exactly this operand count.
+                    (matches!(
                         name.as_str(),
                         "$sformatf" | "$psprintf" | "$signed" | "$unsigned"
-                    ) && args.iter().all(|a| expr_ok(a, bound, me, ext))
+                    ) || RealMathOp::from_name(name).is_some_and(|(_, arity)| args.len() == arity))
+                        && args.iter().all(|a| expr_ok(a, bound, me, ext))
                 }
                 ExprKind::Call { func, args } => {
                     let ExprKind::Ident(h) = &func.kind else {
@@ -12897,21 +13022,12 @@ impl<'a> BytecodeCompiler<'a> {
                     })
             }
             ExprKind::SystemCall { name, args } => {
-                matches!(
-                    name.as_str(),
-                    "$realtime"
-                        | "$__xz_realtime_at"
-                        | "$itor"
-                        | "$bitstoreal"
-                        | "$shortrealtobits"
-                        | "$sqrt"
-                        | "$ln"
-                        | "$log10"
-                        | "$exp"
-                        | "$pow"
-                        | "$floor"
-                        | "$ceil"
-                ) || args.iter().any(|a| self.expr_may_be_real(a))
+                // §20.8.2: every Table 20-4 function is real, not only the
+                // first few; `$tanh(x)` and `$cos(x)` compile now (see
+                // `Insn::RealMath`), so the list has to be complete.
+                system_function_is_real(name.as_str())
+                    || name == "$shortrealtobits"
+                    || args.iter().any(|a| self.expr_may_be_real(a))
             }
             ExprKind::Paren(x) | ExprKind::Unary { operand: x, .. } => self.expr_may_be_real(x),
             ExprKind::Binary { left, right, .. } => {
@@ -20170,6 +20286,27 @@ impl<'a> BytecodeCompiler<'a> {
                         }
                     }
                 }
+                // §20.5, §20.8.2: the real math and real-conversion functions
+                // compile to one `RealMath`. They used to reach the arm below,
+                // and the statement fallback it produced kept the whole
+                // process off compiled code even on a branch that never ran.
+                // Operands are self-determined, as the interpreter evaluates
+                // them; any other operand count keeps the interpreter's
+                // missing-operand handling.
+                n if RealMathOp::from_name(n).is_some_and(|(_, arity)| args.len() == arity) => {
+                    let (op, arity) = RealMathOp::from_name(n)?;
+                    let a = self.compile_expr(&args[0], 0)?;
+                    let b = if arity == 2 {
+                        self.compile_expr(&args[1], 0)?
+                    } else {
+                        a
+                    };
+                    // A fresh destination: for a bare local compile_expr
+                    // hands back the local's own register.
+                    let d = self.alloc_reg();
+                    self.emit(Insn::RealMath(d, a, b, op));
+                    Some(d)
+                }
                 other => {
                     let _ = other;
                     if std::env::var_os("XEZIM_PROBE_SYSCALL").is_some() {
@@ -25818,6 +25955,7 @@ impl<'a> BytecodeCompiler<'a> {
                 }
             }
             Insn::Pow(_, l, rr)
+            | Insn::RealMath(_, l, rr, _)
             | Insn::Add(_, l, rr)
             | Insn::Sub(_, l, rr)
             | Insn::Mul(_, l, rr)
@@ -26229,6 +26367,7 @@ impl<'a> BytecodeCompiler<'a> {
             | Insn::LoadArrayElem(d, _, _)
             | Insn::LoadDynElem(d, _, _)
             | Insn::Pow(d, _, _)
+            | Insn::RealMath(d, _, _, _)
             | Insn::Add(d, _, _)
             | Insn::Sub(d, _, _)
             | Insn::Mul(d, _, _)
@@ -26323,6 +26462,7 @@ impl<'a> BytecodeCompiler<'a> {
         };
         match insn {
             Insn::Pow(_, l, r)
+            | Insn::RealMath(_, l, r, _)
             | Insn::Add(_, l, r)
             | Insn::Sub(_, l, r)
             | Insn::Mul(_, l, r)
@@ -27093,6 +27233,7 @@ impl<'a> BytecodeCompiler<'a> {
                 | Insn::Div(d, _, _)
                 | Insn::Mod(d, _, _)
                 | Insn::Pow(d, _, _)
+                | Insn::RealMath(d, _, _, _)
                 | Insn::BitAnd(d, _, _)
                 | Insn::BitOr(d, _, _)
                 | Insn::BitXor(d, _, _)
@@ -27934,6 +28075,9 @@ impl<'a> BytecodeCompiler<'a> {
                 // Result width is the (runtime) left operand's width — not
                 // statically tracked here.
                 Insn::Pow(d, _, _) => store(&mut rw, *d, None),
+                // §20.5, §20.8.2: a real, or an integer whose width the
+                // op fixes; not tracked here, like `Pow`.
+                Insn::RealMath(d, _, _, _) => store(&mut rw, *d, None),
 
                 // No register destination.
                 Insn::WaitDelayReg(..)

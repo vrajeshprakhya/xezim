@@ -3104,6 +3104,7 @@ impl Simulator {
             Insn::LoadDynElem(..) => "LoadDynElem",
             Insn::ClearSigned(..) => "ClearSigned",
             Insn::Pow(..) => "Pow",
+            Insn::RealMath(..) => "RealMath",
             Insn::SetSigned(..) => "SetSigned",
             Insn::DropXz(..) => "DropXz",
             Insn::RealToInt(..) => "RealToInt",

@@ -4569,170 +4569,33 @@ impl Simulator {
                     .unwrap_or(false);
                 Value::from_u64(signed as u64, 1)
             }
-            "$realtobits" => {
-                // §20.5: return the 64-bit IEEE-754 pattern of the real as an
-                // INTEGER bit-vector (not a real), so it can be indexed/stored
-                // as bits. `v` is a real Value whose bits already are the
-                // pattern; re-emit them as a plain 64-bit integer.
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_u64(v.to_f64().to_bits(), 64)
-            }
-            "$bitstoreal" => {
-                // §20.5: reinterpret the 64-bit pattern as an IEEE-754 double.
-                // The old pass-through left is_real=false, so the bits were
-                // read as a huge integer (0x3FF0000000000000 -> 4.6e18 instead
-                // of 1.0). Rebuild the real from the raw bits.
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(f64::from_bits(v.to_u64().unwrap_or(0)))
-            }
-            "$itor" => {
-                // §20.4: convert a (signed) integer to real. `to_u64` read a
-                // negative arg as a huge unsigned value ($itor(-5) -> 4.29e9);
-                // `to_i64` honors the operand's signedness so -5 -> -5.0.
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(32));
-                Value::from_f64(v.to_i64().unwrap_or(0) as f64)
-            }
-            "$rtoi" => {
-                // §20.5: returns `integer` (a SIGNED 32-bit type), so %d
-                // prints e.g. -3, not 4294967293; out of the 64-bit range it
-                // is 0 (see `Value::rtoi`).
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::rtoi(v.to_f64())
-            }
-            "$ceil" => {
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(v.to_f64().ceil())
-            }
-            "$floor" => {
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(v.to_f64().floor())
-            }
-            "$sqrt" => {
-                // §20.8.2: real result, matches C sqrt().
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(v.to_f64().sqrt())
-            }
-            "$pow" => {
+            // §20.5, §20.8.2: the real conversions and the Table 20-4 math
+            // functions, through `RealMathOp::apply` -- the definition the
+            // compiled `Insn::RealMath` runs, so the two cannot disagree. As
+            // before: only the operands the function takes are evaluated,
+            // in order, and a missing one reads as zero.
+            n if crate::compiler::bytecode::RealMathOp::from_name(n).is_some() => {
+                let (op, arity) = crate::compiler::bytecode::RealMathOp::from_name(n).unwrap();
                 let a = args
                     .first()
                     .map(|a| self.eval_expr(a))
                     .unwrap_or(Value::zero(64));
-                let b = args
-                    .get(1)
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(a.to_f64().powf(b.to_f64()))
+                let b = if arity == 2 {
+                    args.get(1)
+                        .map(|a| self.eval_expr(a))
+                        .unwrap_or(Value::zero(64))
+                } else {
+                    Value::zero(64)
+                };
+                op.apply(&a, &b)
             }
-            "$log10" => {
-                // §20.8.2: real result, matches C log10().
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(v.to_f64().log10())
-            }
-            "$exp" => {
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(v.to_f64().exp())
-            }
-            "$ln" => {
-                let v = args
-                    .first()
-                    .map(|a| self.eval_expr(a))
-                    .unwrap_or(Value::zero(64));
-                Value::from_f64(v.to_f64().ln())
-            }
+            // Not IEEE 1800, so not a `RealMathOp` (see `RealMathOp::from_name`).
             "$log2" => {
                 let v = args
                     .first()
                     .map(|a| self.eval_expr(a))
                     .unwrap_or(Value::zero(64));
                 Value::from_f64(v.to_f64().log2())
-            }
-            // §20.8.2 real trigonometric and hyperbolic functions. Per
-            // Table 20-4 each matches the equivalent C <math.h> function.
-            // All take a real argument (two for $atan2/$hypot) and return a
-            // real result. f64 methods below are direct C-library mirrors.
-            "$sin" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.sin())
-            }
-            "$cos" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.cos())
-            }
-            "$tan" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.tan())
-            }
-            "$asin" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.asin())
-            }
-            "$acos" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.acos())
-            }
-            "$atan" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.atan())
-            }
-            // $atan2(y, x): first arg is y, second is x (Table 20-4).
-            "$atan2" => {
-                let (a, b) = real2(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(a.atan2(b))
-            }
-            "$hypot" => {
-                let (a, b) = real2(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(a.hypot(b))
-            }
-            "$sinh" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.sinh())
-            }
-            "$cosh" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.cosh())
-            }
-            "$tanh" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.tanh())
-            }
-            "$asinh" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.asinh())
-            }
-            "$acosh" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.acosh())
-            }
-            "$atanh" => {
-                let v = real1(args, &mut |a| self.eval_expr(a));
-                Value::from_f64(v.atanh())
             }
             // §6.24.1 TYPE cast `int'(x)` / `real'(x)` — lowered by the
             // parser. A real → integral cast ROUNDS (§6.12.2); an integral

@@ -767,6 +767,9 @@ impl Simulator {
                 Insn::Pow(d, l, r) => {
                     vm_regs[*d as usize] = vm_regs[*l as usize].power(&vm_regs[*r as usize]);
                 }
+                Insn::RealMath(d, a, b, op) => {
+                    vm_regs[*d as usize] = op.apply(&vm_regs[*a as usize], &vm_regs[*b as usize]);
+                }
                 // These should never appear in parallel-eligible blocks
                 Insn::StmtFallback(..)
                 | Insn::EvalExprFallback(..)
@@ -1314,6 +1317,9 @@ impl Simulator {
                 Insn::RealToInt(reg) => real_to_int_reg(&mut vm_regs[*reg as usize]),
                 Insn::Pow(d, l, r) => {
                     vm_regs[*d as usize] = vm_regs[*l as usize].power(&vm_regs[*r as usize]);
+                }
+                Insn::RealMath(d, a, b, op) => {
+                    vm_regs[*d as usize] = op.apply(&vm_regs[*a as usize], &vm_regs[*b as usize]);
                 }
                 Insn::LoadArrayElem(dest, array_name, idx_reg) => {
                     // §7.4.6 / §11.5.1: an UNKNOWN index reads x, NOT element 0.
@@ -4830,6 +4836,10 @@ impl Simulator {
                 Insn::Pow(d, l, r) => {
                     self.vm_regs[*d as usize] =
                         self.vm_regs[*l as usize].power(&self.vm_regs[*r as usize]);
+                }
+                Insn::RealMath(d, a, b, op) => {
+                    self.vm_regs[*d as usize] =
+                        op.apply(&self.vm_regs[*a as usize], &self.vm_regs[*b as usize]);
                 }
                 Insn::CovHit(c) => self.cov_count(*c),
                 Insn::Nop => {}

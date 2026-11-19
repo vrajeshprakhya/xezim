@@ -407,7 +407,8 @@ fn method_boost_enabled() -> bool {
 // scoped `$time` read is 64 bits wide. §6.24.1, §7.4.3, §11.5.1: a struct-parameter field
 // sizes its cast, and a part-select after a packed index selects whole elements, clipped to
 // its dimension.
-const METHOD_CACHE_COMPILER_SALT: u64 = 0x6370_6666_3098;
+// §20.5, §20.8.2: real math and real-conversion system functions compile to RealMath.
+const METHOD_CACHE_COMPILER_SALT: u64 = 0x6370_6666_3099;
 
 /// The subroutine shape `try_run_compiled_method` plans for. Borrowed, so
 /// the per-call hooks (class methods, wait-free tasks, free functions) never
@@ -11682,29 +11683,6 @@ struct StochasticQueue {
     longest_wait_queued: Option<i64>,
     sum_wait_removed: i128,
     count_wait_removed: u64,
-}
-
-/// Evaluate the single real argument of a §20.8.2 one-operand real math
-/// function (`$sin`, `$sqrt`, …). Defaults to 0.0 when absent.
-#[inline]
-fn real1<F>(args: &[Expression], eval: &mut F) -> f64
-where
-    F: FnMut(&Expression) -> Value,
-{
-    args.first().map(|a| eval(a).to_f64()).unwrap_or(0.0)
-}
-
-/// Evaluate the two real arguments of a §20.8.2 two-operand real math function
-/// (`$atan2(y,x)`, `$hypot(x,y)`), defaulting missing operands to 0.0.
-#[inline]
-fn real2<F>(args: &[Expression], eval: &mut F) -> (f64, f64)
-where
-    F: FnMut(&Expression) -> Value,
-{
-    (
-        args.first().map(|a| eval(a).to_f64()).unwrap_or(0.0),
-        args.get(1).map(|a| eval(a).to_f64()).unwrap_or(0.0),
-    )
 }
 
 /// Caller-frame state for a queue/dynamic-array LOCAL that a nested call may

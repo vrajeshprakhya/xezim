@@ -192,6 +192,8 @@ impl Opcode {
             Insn::DropXz(_) => Self::DropXz,
             Insn::RealToInt(_) => Self::RealToInt,
             Insn::Pow(_, _, _) => Self::Pow,
+            // Census only: real arithmetic, counted with `Pow`.
+            Insn::RealMath(..) => Self::Pow,
             Insn::Nop | Insn::CovHit(_) => Self::Nop,
             Insn::LoadSignalRange(_, _, _, _) => Self::LoadSignalRange,
             Insn::LoadSignalRangeDyn(_, _, _, _) => Self::LoadSignalRangeDyn,

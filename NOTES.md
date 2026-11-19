@@ -8,6 +8,7 @@ in [docs/user-guide.md](docs/user-guide.md); building and contributing are in
 
 ### Unreleased
 
+- **Performance:** Compile the real math functions of Table 20-4 and the real conversions (`$sqrt`, `$tanh`, `$rtoi`, `$itor`, `$realtobits`, ...) to one bytecode instruction, so a timed process that calls one, directly or through a function, stays on compiled code instead of the interpreter; compiled and interpreted results are the same bits (§20.5, §20.8.2, #1326).
 - **Correctness:** Size an equality, relational, logical, reduction or `inside` result as 1 bit in interpreted code, so it no longer widens the operator around it: `if ((~a) | (m == 5'd12))` over a 1-bit `a` reads `~a` as 0, not as `5'b11110`, in an `if` or `?:` condition, a loop condition, a `case` item, `wait`, an `iff` guard, an assertion and a `$display` argument (§11.6.1, #1369, contributed by akashlevy).
 
 - **Correctness:** Evaluate the operand of a size cast by a field of a struct parameter (`pt.DEPTH'(x)`, `(pt.DEPTH)'(x)`) at the field's value, in compiled and interpreted code and in an instance's body with that instance's value; it passed the operand through at its own width, or took the width of a same-named parameter (§6.24.1, #1370, contributed by akashlevy).
