@@ -44,6 +44,8 @@ mod direct_scoped_calls;
 mod direct_ref_formal_calls;
 #[path = "perf/condition_waiter_gate.rs"]
 mod condition_waiter_gate;
+#[path = "perf/real_math_compiled.rs"]
+mod real_math_compiled;
 
 #[path = "perf/eqc_branch.rs"]
 mod eqc_branch;
